@@ -27,7 +27,7 @@ interface VideoInfo {
   videoId: string | null;
 }
 
-type BackendStatus = "cold" | "waking" | "ready";
+type BackendStatus = "cold" | "waking" | "ready" | "failed";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const COLD_START_TIPS = [
@@ -36,6 +36,29 @@ const COLD_START_TIPS = [
   "Hang tight — first request after a nap takes ~30s",
   "Server is booting up… this only happens after inactivity",
 ];
+
+// Dailymotion URL patterns
+const DM_URL_RE =
+  /(?:https?:\/\/)?(?:www\.)?dailymotion\.com\/video\/([a-zA-Z0-9]+)/i;
+const DM_SHORT_RE =
+  /(?:https?:\/\/)?dai\.ly\/([a-zA-Z0-9]+)/i;
+
+function isDailyMotionUrl(input: string): string | null {
+  const m1 = input.match(DM_URL_RE);
+  if (m1) return `https://www.dailymotion.com/video/${m1[1]}`;
+  const m2 = input.match(DM_SHORT_RE);
+  if (m2) return `https://www.dailymotion.com/video/${m2[1]}`;
+  return null;
+}
+
+function detectOS(): "mac" | "windows" | "linux" | "unknown" {
+  if (typeof navigator === "undefined") return "unknown";
+  const ua = navigator.userAgent.toLowerCase();
+  if (ua.includes("mac")) return "mac";
+  if (ua.includes("win")) return "windows";
+  if (ua.includes("linux")) return "linux";
+  return "unknown";
+}
 
 // ─── Main Page ───────────────────────────────────────────────────────
 export default function Home() {
@@ -49,6 +72,7 @@ export default function Home() {
   const [backendStatus, setBackendStatus] = useState<BackendStatus>("cold");
   const [coldTipIdx, setColdTipIdx] = useState(0);
   const [copied, setCopied] = useState<string | null>(null);
+  const [os, setOs] = useState<"mac" | "windows" | "linux" | "unknown">("unknown");
   const inputRef = useRef<HTMLInputElement>(null);
   const downloadPanelRef = useRef<HTMLDivElement>(null);
 
@@ -59,22 +83,36 @@ export default function Home() {
     });
   }
 
-  // ── Wake-up ping on mount ──
+  // ── Detect OS on mount ──
+  useEffect(() => {
+    setOs(detectOS());
+  }, []);
+
+  // ── Wake-up ping with retries ──
+  const wakeBackend = useCallback(async () => {
+    setBackendStatus("waking");
+    const MAX_PINGS = 6;
+    for (let i = 0; i < MAX_PINGS; i++) {
+      try {
+        const res = await fetch(`${API_URL}/health`, {
+          signal: AbortSignal.timeout(10000),
+        });
+        if (res.ok) {
+          setBackendStatus("ready");
+          return;
+        }
+      } catch {
+        // retry
+      }
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+    setBackendStatus("failed");
+  }, []);
+
   useEffect(() => {
     inputRef.current?.focus();
-    setBackendStatus("waking");
-
-    const ctrl = new AbortController();
-    (async () => {
-      try {
-        const res = await fetch(`${API_URL}/health`, { signal: ctrl.signal });
-        if (res.ok) setBackendStatus("ready");
-      } catch {
-        // will retry on search
-      }
-    })();
-    return () => ctrl.abort();
-  }, []);
+    wakeBackend();
+  }, [wakeBackend]);
 
   // ── Rotate cold-start tips ──
   useEffect(() => {
@@ -97,11 +135,29 @@ export default function Home() {
     }
   }, [selectedVideo, videoInfo]);
 
-  // ── Search with cold-start retry ──
+  // ── Search with cold-start retry (also supports direct DM URLs) ──
   const handleSearch = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
-      if (!query.trim()) return;
+      const trimmed = query.trim();
+      if (!trimmed) return;
+
+      // Check if user pasted a Dailymotion link
+      const dmUrl = isDailyMotionUrl(trimmed);
+      if (dmUrl) {
+        // Skip search — go straight to video extraction
+        setResults([]);
+        setError("");
+        const pseudoResult: SearchResult = {
+          title: "Loading video…",
+          url: dmUrl,
+          thumbnail: null,
+          duration: null,
+          channel: null,
+        };
+        handleSelect(pseudoResult);
+        return;
+      }
 
       setLoading(true);
       setError("");
@@ -207,25 +263,34 @@ export default function Home() {
                 Server ready
               </span>
             )}
+            {backendStatus === "failed" && (
+              <button
+                onClick={wakeBackend}
+                className="inline-flex items-center gap-1.5 text-[11px] text-red-400/80 bg-red-400/10 border border-red-400/20 rounded-full px-3 py-1 hover:bg-red-400/20 transition-colors cursor-pointer"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
+                Server offline — tap to retry
+              </button>
+            )}
           </div>
         </header>
 
         {/* ── Search Bar ── */}
         <section className="mx-auto w-full max-w-2xl px-4 mt-6">
-          <form onSubmit={handleSearch} className="relative">
+          <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-2 sm:gap-0 sm:relative">
             <input
               ref={inputRef}
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Type a drama name… e.g. Vincenzo, Alchemy of Souls"
-              aria-label="Search drama name"
-              className="w-full rounded-2xl bg-zinc-900 border border-zinc-700 px-5 py-4 pr-28 text-base text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/30 transition-all"
+              placeholder="Drama name or Dailymotion link…"
+              aria-label="Search drama name or paste Dailymotion URL"
+              className="w-full rounded-2xl bg-zinc-900 border border-zinc-700 px-5 py-4 sm:pr-28 text-base text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/30 transition-all"
             />
             <button
               type="submit"
               disabled={loading}
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 px-5 py-2.5 text-sm font-semibold text-white transition-colors cursor-pointer"
+              className="sm:absolute sm:right-2 sm:top-1/2 sm:-translate-y-1/2 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 px-5 py-3 sm:py-2.5 text-sm font-semibold text-white transition-colors cursor-pointer"
             >
               {loading ? (
                 <span className="flex items-center gap-2">
@@ -398,7 +463,7 @@ export default function Home() {
                           </span>
                         </div>
                         <div className="flex items-center gap-2 bg-zinc-900/80 rounded-lg p-3">
-                          <code className="text-xs text-green-300 flex-1 overflow-x-auto whitespace-nowrap">
+                          <code className="text-xs text-green-300 flex-1 overflow-x-auto whitespace-nowrap scrollbar-thin">
                             yt-dlp &quot;{selectedVideo.url}&quot;
                           </code>
                           <button
@@ -413,63 +478,103 @@ export default function Home() {
                             {copied === "ytdlp" ? "Copied!" : "Copy"}
                           </button>
                         </div>
-                        <p className="text-[11px] text-zinc-600 mt-2">
-                          Install yt-dlp:{" "}
-                          <button
-                            onClick={() =>
-                              copyToClipboard(
-                                "pip install yt-dlp",
-                                "install"
-                              )
-                            }
-                            className="text-purple-400 hover:text-purple-300 cursor-pointer"
-                          >
-                            {copied === "install"
-                              ? "Copied!"
-                              : "pip install yt-dlp"}
-                          </button>
-                          {" or "}
-                          <button
-                            onClick={() =>
-                              copyToClipboard(
-                                "brew install yt-dlp",
-                                "brew"
-                              )
-                            }
-                            className="text-purple-400 hover:text-purple-300 cursor-pointer"
-                          >
-                            {copied === "brew"
-                              ? "Copied!"
-                              : "brew install yt-dlp"}
-                          </button>
-                        </p>
+
+                        {/* Platform-specific install instructions */}
+                        <div className="mt-3 space-y-1">
+                          <p className="text-[11px] text-zinc-500 font-semibold uppercase tracking-wider">
+                            Install yt-dlp
+                          </p>
+                          {(os === "mac" || os === "unknown") && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] text-zinc-500 w-10 shrink-0">Mac:</span>
+                              <button
+                                onClick={() => copyToClipboard("brew install yt-dlp", "brew")}
+                                className="text-[11px] text-purple-400 hover:text-purple-300 cursor-pointer font-mono"
+                              >
+                                {copied === "brew" ? "✓ Copied!" : "brew install yt-dlp"}
+                              </button>
+                              <span className="text-[11px] text-zinc-600">or</span>
+                              <button
+                                onClick={() => copyToClipboard("pip3 install yt-dlp", "pip3")}
+                                className="text-[11px] text-purple-400 hover:text-purple-300 cursor-pointer font-mono"
+                              >
+                                {copied === "pip3" ? "✓ Copied!" : "pip3 install yt-dlp"}
+                              </button>
+                            </div>
+                          )}
+                          {(os === "windows" || os === "unknown") && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] text-zinc-500 w-10 shrink-0">{os === "unknown" ? "Win:" : "Run:"}</span>
+                              <button
+                                onClick={() => copyToClipboard("pip install yt-dlp", "pipwin")}
+                                className="text-[11px] text-purple-400 hover:text-purple-300 cursor-pointer font-mono"
+                              >
+                                {copied === "pipwin" ? "✓ Copied!" : "pip install yt-dlp"}
+                              </button>
+                              <span className="text-[11px] text-zinc-600">or</span>
+                              <button
+                                onClick={() => copyToClipboard("winget install yt-dlp", "winget")}
+                                className="text-[11px] text-purple-400 hover:text-purple-300 cursor-pointer font-mono"
+                              >
+                                {copied === "winget" ? "✓ Copied!" : "winget install yt-dlp"}
+                              </button>
+                            </div>
+                          )}
+                          {(os === "linux" || os === "unknown") && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] text-zinc-500 w-10 shrink-0">{os === "unknown" ? "Linux:" : "Run:"}</span>
+                              <button
+                                onClick={() => copyToClipboard("pip3 install yt-dlp", "pip3linux")}
+                                className="text-[11px] text-purple-400 hover:text-purple-300 cursor-pointer font-mono"
+                              >
+                                {copied === "pip3linux" ? "✓ Copied!" : "pip3 install yt-dlp"}
+                              </button>
+                            </div>
+                          )}
+                          <p className="text-[10px] text-zinc-600 mt-1">
+                            {os === "mac"
+                              ? "Open Terminal (Cmd+Space → type Terminal), paste the install command, then paste the download command."
+                              : os === "windows"
+                              ? "Open Command Prompt or PowerShell, paste the install command, then paste the download command."
+                              : "Open a terminal, paste the install command, then paste the download command."}
+                          </p>
+                        </div>
                       </div>
                     )}
 
-                    {/* Method 2: VLC / Stream URL */}
+                    {/* Method 2: ffmpeg with Referer header */}
                     {videoInfo.m3u8Url && (
                       <div className="rounded-xl bg-zinc-800/80 border border-zinc-700/50 p-4">
                         <div className="flex items-center gap-2 mb-2">
                           <span className="text-sm text-zinc-300 font-medium">
-                            VLC / Media Player
+                            ffmpeg Download
                           </span>
                         </div>
                         <div className="flex items-center gap-2 bg-zinc-900/80 rounded-lg p-3">
-                          <code className="text-xs text-amber-300 flex-1 overflow-x-auto whitespace-nowrap">
-                            {videoInfo.m3u8Url.substring(0, 60)}…
+                          <code className="text-[11px] text-amber-300 flex-1 overflow-x-auto whitespace-nowrap scrollbar-thin">
+                            ffmpeg -headers &quot;Referer: https://www.dailymotion.com/&quot; -i &quot;…&quot; -c copy output.mp4
                           </code>
                           <button
                             onClick={() =>
-                              copyToClipboard(videoInfo.m3u8Url!, "m3u8")
+                              copyToClipboard(
+                                `ffmpeg -headers "Referer: https://www.dailymotion.com/\r\n" -i "${videoInfo.m3u8Url}" -c copy "${(videoInfo.title || "video").replace(/"/g, "'")}.mp4"`,
+                                "ffmpeg"
+                              )
                             }
                             className="shrink-0 text-xs px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-medium transition-colors cursor-pointer"
                           >
-                            {copied === "m3u8" ? "Copied!" : "Copy URL"}
+                            {copied === "ffmpeg" ? "Copied!" : "Copy"}
                           </button>
                         </div>
-                        <p className="text-[11px] text-zinc-600 mt-2">
-                          VLC → Media → Open Network Stream → paste URL. Or use
-                          any HLS-compatible player.
+                        <p className="text-[10px] text-zinc-600 mt-2">
+                          {os === "mac"
+                            ? "Install ffmpeg: brew install ffmpeg"
+                            : os === "windows"
+                            ? "Download ffmpeg from ffmpeg.org and add to PATH"
+                            : "Install: sudo apt install ffmpeg"}
+                        </p>
+                        <p className="text-[10px] text-zinc-500 mt-1">
+                          ⚠ VLC won&apos;t work — Dailymotion&apos;s CDN requires a Referer header that VLC can&apos;t send.
                         </p>
                       </div>
                     )}
