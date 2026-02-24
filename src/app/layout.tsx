@@ -17,28 +17,33 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: {
-    default: "DramaDL — Download Any Drama Episode Free",
-    template: "%s | DramaDL",
+    default: "DramaDL — Download Drama Episodes for Free in HD",
+    template: "%s | DramaDL — Free Drama Downloads",
   },
   description:
-    "Search and download Korean, Chinese, Thai & Turkish drama episodes for free in HD. Just type the drama name and get instant download links.",
+    "Download Korean drama, Chinese drama, Thai & Turkish drama episodes for free — no sign-up, no ads. Search any drama by name and get free HD download links instantly.",
   keywords: [
-    "drama download",
-    "k-drama download",
-    "c-drama download",
-    "thai drama download",
-    "turkish drama download",
-    "watch drama online",
-    "dailymotion drama",
-    "free drama episodes",
-    "drama HD download",
-    "asian drama download",
+    "download drama for free",
+    "free drama download",
+    "free k-drama download",
+    "download korean drama free",
+    "download chinese drama free",
+    "free c-drama episodes download",
+    "download thai drama free HD",
+    "free turkish drama download",
+    "download drama episodes free online",
+    "free asian drama download HD",
+    "download drama without sign up",
+    "free drama downloader",
+    "download k-drama episodes free HD",
+    "free drama download site",
+    "watch and download drama free",
   ],
   metadataBase: new URL(SITE_URL),
   openGraph: {
-    title: "DramaDL — Download Any Drama Episode Free",
+    title: "DramaDL — Download Any Drama Episode for Free in HD",
     description:
-      "Search and download Korean, Chinese, Thai & Turkish drama episodes for free in HD.",
+      "Free drama downloader — search by name and download Korean, Chinese, Thai & Turkish drama episodes in HD. No sign-up required.",
     url: SITE_URL,
     siteName: "DramaDL",
     locale: "en_US",
@@ -46,9 +51,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "DramaDL — Download Any Drama Episode Free",
+    title: "DramaDL — Free Drama Downloads in HD",
     description:
-      "Search and download drama episodes for free in HD. Just type the name.",
+      "Download any drama episode for free. Just type the name, pick a quality, and download — no sign-up needed.",
   },
   robots: {
     index: true,
@@ -66,13 +71,20 @@ export default function RootLayout({
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "WebApplication",
-    name: "DramaDL",
+    name: "DramaDL — Free Drama Downloader",
     url: SITE_URL,
     description:
-      "Search and download Korean, Chinese, Thai & Turkish drama episodes for free in HD.",
+      "Download drama episodes for free in HD — Korean, Chinese, Thai & Turkish dramas. No sign-up, no ads, just free downloads.",
     applicationCategory: "EntertainmentApplication",
     operatingSystem: "Any",
-    offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+    offers: {
+      "@type": "Offer",
+      price: "0",
+      priceCurrency: "USD",
+      availability: "https://schema.org/InStock",
+      description: "100% free — no subscription or sign-up required",
+    },
+    featureList: "Free HD drama downloads, Korean drama, Chinese drama, Thai drama, Turkish drama, No sign-up required",
   };
 
   return (

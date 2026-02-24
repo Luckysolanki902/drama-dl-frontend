@@ -23,6 +23,8 @@ interface VideoInfo {
   thumbnail: string | null;
   duration: number | null;
   streams: VideoStream[];
+  m3u8Url: string | null;
+  videoId: string | null;
 }
 
 type BackendStatus = "cold" | "waking" | "ready";
@@ -46,8 +48,16 @@ export default function Home() {
   const [loadingVideo, setLoadingVideo] = useState(false);
   const [backendStatus, setBackendStatus] = useState<BackendStatus>("cold");
   const [coldTipIdx, setColdTipIdx] = useState(0);
+  const [copied, setCopied] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const downloadPanelRef = useRef<HTMLDivElement>(null);
+
+  function copyToClipboard(text: string, label: string) {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(label);
+      setTimeout(() => setCopied(null), 2000);
+    });
+  }
 
   // ── Wake-up ping on mount ──
   useEffect(() => {
@@ -136,7 +146,7 @@ export default function Home() {
     [query, backendStatus]
   );
 
-  // ── Get download links ──
+  // ── Get download links (via local Next.js API route → Vercel) ──
   async function handleSelect(result: SearchResult) {
     setSelectedVideo(result);
     setVideoInfo(null);
@@ -144,7 +154,7 @@ export default function Home() {
 
     try {
       const res = await fetch(
-        `${API_URL}/api/video?url=${encodeURIComponent(result.url)}`,
+        `/api/video?url=${encodeURIComponent(result.url)}`,
         { signal: AbortSignal.timeout(45000) }
       );
       if (!res.ok) throw new Error("Failed to extract video");
@@ -351,36 +361,147 @@ export default function Home() {
               )}
 
               {videoInfo && (
-                <div className="mt-6 space-y-3">
-                  <p className="text-xs text-zinc-500 uppercase tracking-wider font-semibold">
-                    Available Qualities
-                  </p>
-                  {videoInfo.streams.map((s, i) => (
-                    <a
-                      key={i}
-                      href={s.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center justify-between gap-3 rounded-xl bg-zinc-800/80 border border-zinc-700/50 p-4 hover:border-purple-500/50 hover:bg-zinc-800 transition-all group"
-                    >
-                      <div className="flex items-center gap-3">
+                <div className="mt-6 space-y-4">
+                  {/* Quality badges */}
+                  <div>
+                    <p className="text-xs text-zinc-500 uppercase tracking-wider font-semibold mb-2">
+                      Available Qualities
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {videoInfo.streams.map((s, i) => (
                         <span
-                          className={`text-xs font-bold px-2.5 py-1 rounded-lg ${qualityColor(s.quality)}`}
+                          key={i}
+                          className={`text-xs font-bold px-3 py-1.5 rounded-lg ${qualityColor(s.quality)}`}
                         >
                           {s.quality}
+                          {s.height ? ` (${s.width}×${s.height})` : ""}
                         </span>
-                        <span className="text-sm text-zinc-300">
-                          {s.height ? `${s.height}p` : s.quality} stream
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Download methods */}
+                  <div className="space-y-3">
+                    <p className="text-xs text-zinc-500 uppercase tracking-wider font-semibold">
+                      How to Download
+                    </p>
+
+                    {/* Method 1: yt-dlp command */}
+                    {selectedVideo && (
+                      <div className="rounded-xl bg-zinc-800/80 border border-zinc-700/50 p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-green-400 text-xs font-bold px-2 py-0.5 rounded bg-green-400/10">
+                            RECOMMENDED
+                          </span>
+                          <span className="text-sm text-zinc-300 font-medium">
+                            yt-dlp (Terminal)
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 bg-zinc-900/80 rounded-lg p-3">
+                          <code className="text-xs text-green-300 flex-1 overflow-x-auto whitespace-nowrap">
+                            yt-dlp &quot;{selectedVideo.url}&quot;
+                          </code>
+                          <button
+                            onClick={() =>
+                              copyToClipboard(
+                                `yt-dlp "${selectedVideo.url}"`,
+                                "ytdlp"
+                              )
+                            }
+                            className="shrink-0 text-xs px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-medium transition-colors cursor-pointer"
+                          >
+                            {copied === "ytdlp" ? "Copied!" : "Copy"}
+                          </button>
+                        </div>
+                        <p className="text-[11px] text-zinc-600 mt-2">
+                          Install yt-dlp:{" "}
+                          <button
+                            onClick={() =>
+                              copyToClipboard(
+                                "pip install yt-dlp",
+                                "install"
+                              )
+                            }
+                            className="text-purple-400 hover:text-purple-300 cursor-pointer"
+                          >
+                            {copied === "install"
+                              ? "Copied!"
+                              : "pip install yt-dlp"}
+                          </button>
+                          {" or "}
+                          <button
+                            onClick={() =>
+                              copyToClipboard(
+                                "brew install yt-dlp",
+                                "brew"
+                              )
+                            }
+                            className="text-purple-400 hover:text-purple-300 cursor-pointer"
+                          >
+                            {copied === "brew"
+                              ? "Copied!"
+                              : "brew install yt-dlp"}
+                          </button>
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Method 2: VLC / Stream URL */}
+                    {videoInfo.m3u8Url && (
+                      <div className="rounded-xl bg-zinc-800/80 border border-zinc-700/50 p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-sm text-zinc-300 font-medium">
+                            VLC / Media Player
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 bg-zinc-900/80 rounded-lg p-3">
+                          <code className="text-xs text-amber-300 flex-1 overflow-x-auto whitespace-nowrap">
+                            {videoInfo.m3u8Url.substring(0, 60)}…
+                          </code>
+                          <button
+                            onClick={() =>
+                              copyToClipboard(videoInfo.m3u8Url!, "m3u8")
+                            }
+                            className="shrink-0 text-xs px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-medium transition-colors cursor-pointer"
+                          >
+                            {copied === "m3u8" ? "Copied!" : "Copy URL"}
+                          </button>
+                        </div>
+                        <p className="text-[11px] text-zinc-600 mt-2">
+                          VLC → Media → Open Network Stream → paste URL. Or use
+                          any HLS-compatible player.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Method 3: Direct download (may fail) */}
+                    <div className="rounded-xl bg-zinc-800/80 border border-zinc-700/50 p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-zinc-500 text-xs font-bold px-2 py-0.5 rounded bg-zinc-700/50">
+                          EXPERIMENTAL
+                        </span>
+                        <span className="text-sm text-zinc-300 font-medium">
+                          Direct Download
                         </span>
                       </div>
-                      <span className="text-purple-400 group-hover:text-purple-300 text-sm font-medium flex items-center gap-1">
-                        <DownloadIcon /> Download
-                      </span>
-                    </a>
-                  ))}
-                  <p className="text-[11px] text-zinc-600 mt-2">
-                    Tip: Right-click &rarr; &ldquo;Save link as&rdquo; to download the file directly.
-                  </p>
+                      <div className="flex flex-wrap gap-2">
+                        {videoInfo.streams.map((s, i) => (
+                          <a
+                            key={i}
+                            href={s.url}
+                            download
+                            className="text-xs px-3 py-1.5 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-zinc-300 font-medium transition-colors flex items-center gap-1"
+                          >
+                            <DownloadIcon /> {s.quality}
+                          </a>
+                        ))}
+                      </div>
+                      <p className="text-[11px] text-zinc-600 mt-2">
+                        Server-side download — may not work due to CDN
+                        restrictions. Use yt-dlp for guaranteed results.
+                      </p>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -399,13 +520,19 @@ export default function Home() {
         {/* ── SEO rich text (visible, useful, not spammy) ── */}
         <section className="mx-auto mt-20 w-full max-w-3xl px-6 text-center">
           <h2 className="text-lg font-semibold text-zinc-300">
-            Download Drama Episodes for Free
+            Download Any Drama Episode for Free — No Sign-Up
           </h2>
           <p className="mt-2 text-sm leading-relaxed text-zinc-500 max-w-xl mx-auto">
-            DramaDL lets you search and download Korean dramas (K-Drama),
-            Chinese dramas (C-Drama), Thai dramas, Turkish series and more — all
-            in HD quality. Simply type the name of any drama, pick an episode
-            from the results, and choose your preferred quality to download.
+            DramaDL is a <strong className="text-zinc-400">100% free drama downloader</strong>.
+            Download Korean dramas (K-Drama), Chinese dramas (C-Drama), Thai
+            dramas, Turkish series and more in HD — completely free, no account
+            needed. Just search the drama name, pick an episode, choose your
+            quality (1080p, 720p, 480p), and download instantly.
+          </p>
+          <p className="mt-3 text-xs leading-relaxed text-zinc-600 max-w-lg mx-auto">
+            Popular free downloads: Goblin, Crash Landing on You, Vincenzo,
+            The Glory, Alchemy of Souls, Love Between Fairy and Devil,
+            Hidden Love, Ertugrul, F4 Thailand — and thousands more.
           </p>
         </section>
 
@@ -413,11 +540,13 @@ export default function Home() {
         <footer className="mt-10 pb-8 text-center text-xs text-zinc-600 space-y-1 px-4">
           <p>
             This is a <span className="text-zinc-400 font-medium">fan-made</span> app.
-            We do not host any content.
+            We do not host any content — all videos are sourced from public platforms.
+          </p>
+          <p className="text-zinc-700">
+            Free drama downloads &middot; No ads &middot; No sign-up &middot; HD quality
           </p>
           <p>
-            Built with Next.js &amp; FastAPI &mdash; DramaDL &copy;{" "}
-            {new Date().getFullYear()}
+            DramaDL &copy; {new Date().getFullYear()}
           </p>
         </footer>
       </div>
